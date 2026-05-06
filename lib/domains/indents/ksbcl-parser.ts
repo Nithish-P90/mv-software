@@ -136,7 +136,7 @@ function parseMergedNumbers(raw: string): {
   indCbs: number; indBtls: number; indAmt: number
   cnfCbs: number; cnfBtls: number; cnfAmt: number
 } | null {
-  let s = raw.trim()
+  const s = raw.trim()
   if (!s || !/^\d/.test(s)) return null
 
   // Detect glued 4-digit code prefix: 4 digits where digit 5 starts a plausible rate
