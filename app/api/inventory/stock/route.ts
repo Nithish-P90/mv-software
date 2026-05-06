@@ -3,6 +3,7 @@ import { z } from "zod"
 import { prisma } from "@/lib/platform/prisma"
 import { requireApiAuth, parseQuery, jsonOk, apiError } from "@/lib/api/handler"
 import { splitStock, getStockSnapshot } from "@/lib/domains/inventory/stock"
+import { ensureDailyRollover } from "@/lib/domains/inventory/rollover"
 
 const querySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).default(500),
@@ -14,6 +15,8 @@ const querySchema = z.object({
 export async function GET(req: Request): Promise<Response> {
   const authResult = await requireApiAuth("session", req)
   if (authResult instanceof Response) return authResult
+
+  await ensureDailyRollover()
 
   const queryOrError = parseQuery(req, querySchema)
   if (queryOrError instanceof Response) return queryOrError
