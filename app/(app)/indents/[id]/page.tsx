@@ -5,10 +5,30 @@ import { CheckCircle2, AlertTriangle } from "lucide-react"
 import { PageShell } from "@/components/PageShell"
 import { Button } from "@/components/ui/Button"
 
+type IndentItem = {
+  id: number
+  cnfCases: number
+  cnfBottles: number
+  cnfAmount: string | number
+  isRationed: boolean
+  rawItemName: string | null
+  productSizeId: number | null
+  productSize: { sizeMl: number; bottlesPerCase: number; product: { name: string } } | null
+}
+
+type IndentDetail = {
+  id: number
+  indentNumber: string
+  invoiceNumber: string
+  indentDate: string
+  status: string
+  items: IndentItem[]
+}
+
 export default function IndentDetailPage() {
   const router = useRouter()
   const { id } = useParams()
-  const [indent, setIndent] = useState<any>(null)
+  const [indent, setIndent] = useState<IndentDetail | null>(null)
   const [receiveQtys, setReceiveQtys] = useState<Record<number, { casesReceived: number; bottlesReceived: number }>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -18,12 +38,12 @@ export default function IndentDetailPage() {
   useEffect(() => {
     fetch("/api/indents")
       .then((r) => r.json())
-      .then((data: any[]) => {
+      .then((data: IndentDetail[]) => {
         const found = data.find((d) => d.id === parseInt(id as string))
         if (found) {
           setIndent(found)
           const init: Record<number, { casesReceived: number; bottlesReceived: number }> = {}
-          found.items.forEach((item: any) => {
+          found.items.forEach((item) => {
             init[item.id] = { casesReceived: item.cnfCases, bottlesReceived: item.cnfBottles }
           })
           setReceiveQtys(init)
@@ -33,10 +53,11 @@ export default function IndentDetailPage() {
   }, [id])
 
   async function receiveStock() {
+    if (!indent) return
     setSaving(true)
     setError("")
     try {
-      const items = indent.items.map((item: any) => ({
+      const items = indent.items.map((item) => ({
         indentItemId: item.id,
         productSizeId: item.productSizeId,
         casesReceived: receiveQtys[item.id]?.casesReceived ?? 0,

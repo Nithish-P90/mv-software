@@ -5,9 +5,21 @@ import { Plus } from "lucide-react"
 import { PageShell } from "@/components/PageShell"
 import { Button } from "@/components/ui/Button"
 
+type IndentRow = {
+  id: number
+  indentNumber: string
+  invoiceNumber: string
+  retailerId: string
+  retailerName: string
+  indentDate: string
+  status: string
+  items: { id: number; cnfAmount: string | number; indentAmount: string | number; isRationed: boolean }[]
+  receipts: { id: number }[]
+}
+
 export default function IndentsPage() {
   const router = useRouter()
-  const [indents, setIndents] = useState<any[]>([])
+  const [indents, setIndents] = useState<IndentRow[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -61,8 +73,8 @@ export default function IndentsPage() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {indents.map((indent) => {
-                const cnfValue = indent.items.reduce((s: number, i: any) => s + Number(i.cnfAmount), 0)
-                const rationedCount = indent.items.filter((i: any) => i.isRationed).length
+                const cnfValue = indent.items.reduce((s, i) => s + Number(i.cnfAmount), 0)
+                const rationedCount = indent.items.filter((i) => i.isRationed).length
                 return (
                   <tr key={indent.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="px-5 py-3 font-mono text-xs font-black text-slate-800">{indent.indentNumber}</td>
