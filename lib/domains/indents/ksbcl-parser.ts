@@ -34,8 +34,10 @@ export type ParsedIndent = {
   warnings: string[]
 }
 
+// ── Regexes ───────────────────────────────────────────────────────────────────
+
 const CODE_8_RE = /0\d{7}/
-const CODE_4_RE = /\b(1[0-9]\d{2})\b/
+const CODE_4_ALONE_RE = /^(1[0-9]\d{2})$/
 const SIZE_PACK_RE = /(\d{2,3})\s*ML\s*[xX×]\s*(\d+)\s*P?\.?\s*(?:Btls?|Cans?|ABP)/i
 const SIZE_ONLY_RE = /(\d{2,3})\s*ML/i
 
@@ -56,7 +58,10 @@ function extractSizeInfo(text: string): { sizeMl: number; bottlesPerCase: number
   const sizeMatch = SIZE_ONLY_RE.exec(text)
   if (sizeMatch) {
     const sizeMl = parseInt(sizeMatch[1])
-    const defaults: Record<number, number> = { 60: 150, 90: 96, 180: 48, 200: 48, 275: 24, 330: 24, 375: 24, 500: 24, 650: 12, 750: 12 }
+    const defaults: Record<number, number> = {
+      60: 150, 90: 96, 180: 48, 200: 48, 275: 24,
+      330: 24, 375: 24, 500: 24, 650: 12, 750: 12,
+    }
     return { sizeMl, bottlesPerCase: defaults[sizeMl] ?? 12 }
   }
   return { sizeMl: 0, bottlesPerCase: 12 }
@@ -65,7 +70,7 @@ function extractSizeInfo(text: string): { sizeMl: number; bottlesPerCase: number
 function cleanItemName(raw: string): string {
   return raw
     .replace(CODE_8_RE, "")
-    .replace(CODE_4_RE, "")
+    .replace(/\b1[0-9]\d{2}\b/g, "")
     .replace(/\(\d{4}\)/g, "")
     .replace(SIZE_PACK_RE, "")
     .replace(SIZE_ONLY_RE, "")
@@ -76,17 +81,14 @@ function cleanItemName(raw: string): string {
     .trim()
 }
 
-// ── Merged-number parser ──────────────────────────────────────────────────────
+// ── Numeric group parser ──────────────────────────────────────────────────────
 //
-// KSBCL PDFs render each table row's numeric columns without spaces, e.g.:
+// KSBCL PDFs concatenate all numeric columns with no separators, e.g.:
 //   "4143.49208286.98208286.98"
-// = rate(4143.49) + indCBS(2) + indBTLS(0) + indAmt(8286.98) + cnfCBS(2) + cnfBTLS(0) + cnfAmt(8286.98)
+//   = rate(4143.49) indCBS(2) indBTLS(0) indAmt(8286.98) cnfCBS(2) cnfBTLS(0) cnfAmt(8286.98)
 //
-// Strategy:
-//  1. Extract rate (first number, always 0 or 2 decimal places, >= 50)
-//  2. For each indent/cnf group: try CBS lengths 1-3, BTLS lengths 1-3.
-//     When CBS > 0 use the fact that indAmt = CBS × rate to validate/locate amount.
-//     When CBS = 0 (bottle-only), extract the first decimal number as the amount.
+// For CBS>0: indAmt = CBS × rate (used to locate amount boundary)
+// For CBS=0: the amount is the first decimal number after BTLS
 
 type NumGroup = { cbs: number; btls: number; amt: number; rest: string }
 
@@ -105,17 +107,20 @@ function tryGroup(s: string, rate: number): NumGroup | null {
 
       if (cbs > 0) {
         const expectedAmt = Math.round(cbs * rate * 100) / 100
-        // Try both JS default string and toFixed(2)
         for (const amtStr of [String(expectedAmt), expectedAmt.toFixed(2)]) {
           if (afterBtls.startsWith(amtStr)) {
             return { cbs, btls, amt: expectedAmt, rest: afterBtls.slice(amtStr.length) }
           }
         }
       } else {
-        // CBS=0: bottle-only row — take the first decimal (up to 2 decimal places)
         const m = /^(\d+\.\d{1,2})(.*)$/.exec(afterBtls)
         if (m) {
           return { cbs: 0, btls, amt: parseNum(m[1]), rest: m[2] }
+        }
+        // Whole-number amount when CBS=0 (rare but possible)
+        const wm = /^(\d{3,})(.*)$/.exec(afterBtls)
+        if (wm && wm[2] === "") {
+          return { cbs: 0, btls, amt: parseNum(wm[1]), rest: "" }
         }
       }
     }
@@ -123,13 +128,40 @@ function tryGroup(s: string, rate: number): NumGroup | null {
   return null
 }
 
-function tryParseMergedLine(line: string): [number, number, number, number, number, number, number] | null {
-  const s = line.trim()
+// Parse the 7 numeric fields from a merged string (rate, indCBS, indBTLS, indAmt, cnfCBS, cnfBTLS, cnfAmt).
+// The string may be prefixed by a 4-digit item code — strip it first if detected.
+function parseMergedNumbers(raw: string): {
+  code4: string | null
+  rate: number
+  indCbs: number; indBtls: number; indAmt: number
+  cnfCbs: number; cnfBtls: number; cnfAmt: number
+} | null {
+  let s = raw.trim()
   if (!s || !/^\d/.test(s)) return null
 
-  // Collect rate candidates: decimal (2dp) first, then whole-number prefixes 3-6 digits
-  type RC = { rate: number; rest: string }
-  const candidates: RC[] = []
+  // Detect glued 4-digit code prefix: 4 digits where digit 5 starts a plausible rate
+  let code4: string | null = null
+  const c4m = /^(1[0-9]\d{2})(\d{3,6}\.?\d*)/.exec(s)
+  if (c4m) {
+    // Tentatively strip the code and try parsing the rest
+    const candidate = s.slice(4)
+    const parsed = tryParseSevenFields(candidate)
+    if (parsed) {
+      code4 = c4m[1]
+      const [rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt] = parsed
+      return { code4, rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt }
+    }
+  }
+
+  const parsed = tryParseSevenFields(s)
+  if (!parsed) return null
+  const [rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt] = parsed
+  return { code4: null, rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt }
+}
+
+function tryParseSevenFields(s: string): [number, number, number, number, number, number, number] | null {
+  // Build rate candidates: decimal first, then whole-number prefixes
+  const candidates: Array<{ rate: number; rest: string }> = []
 
   const dm = /^(\d{2,6}\.\d{2})(.*)$/.exec(s)
   if (dm) candidates.push({ rate: parseNum(dm[1]), rest: dm[2] })
@@ -139,8 +171,8 @@ function tryParseMergedLine(line: string): [number, number, number, number, numb
     if (!/^\d+$/.test(rStr)) continue
     const r = parseInt(rStr)
     if (r < 50) continue
-    // Skip if this duplicates the decimal match
-    if (dm && s.slice(0, len) === dm[1].replace(".", "").slice(0, len)) continue
+    // Don't duplicate what dm already covers
+    if (dm && s.startsWith(dm[1].replace(".", ""))) continue
     candidates.push({ rate: r, rest: s.slice(len) })
   }
 
@@ -149,7 +181,7 @@ function tryParseMergedLine(line: string): [number, number, number, number, numb
     if (!g1) continue
     const g2 = tryGroup(g1.rest, rate)
     if (!g2) continue
-    if (g2.rest.trim()) continue // unexpected trailing content
+    if (g2.rest.trim()) continue
     return [rate, g1.cbs, g1.btls, g1.amt, g2.cbs, g2.btls, g2.amt]
   }
 
@@ -163,7 +195,7 @@ export async function parseKsbclPdf(buffer: Buffer): Promise<ParsedIndent> {
   const text = data.text
   const warnings: string[] = []
 
-  // Header
+  // Header fields
   const retailerFull = /RETAILER:\s*(.+?)(?:\s*INDENT\s*NO|\s*$)/i.exec(text)?.[1]?.trim() ?? ""
   const retailerIdMatch = /\((\d{4,6})\)/.exec(retailerFull)
   const retailerId = retailerIdMatch?.[1] ?? ""
@@ -177,128 +209,148 @@ export async function parseKsbclPdf(buffer: Buffer): Promise<ParsedIndent> {
   if (!indentNumber) warnings.push("Could not parse indent number from PDF")
   if (!retailerId) warnings.push("Could not parse retailer ID from PDF")
 
-  // Table section
-  const tableStartIdx = text.indexOf("SR NO")
-  const totalMatch = /\bTOTAL\s+\d/.exec(text)
+  // Slice the table region
+  const tableStart = text.indexOf("SR NO")
+  const totalMatch = /\bTOTAL\b/.exec(text)
   const tableText = text.slice(
-    tableStartIdx > 0 ? tableStartIdx : 0,
+    tableStart > 0 ? tableStart : 0,
     totalMatch ? totalMatch.index : text.length,
   )
-  const lines = tableText.split("\n")
 
-  // Find data lines
-  type DataHit = {
-    lineIdx: number
-    rate: number; indCbs: number; indBtls: number; indAmt: number
-    cnfCbs: number; cnfBtls: number; cnfAmt: number
-    prefixText: string
+  // Split into lines, drop table header lines
+  const TABLE_HEADER_WORDS = new Set(["SR NO", "ITEM NAME", "ITEM CODE", "RATE", "(PER CB.)", "INDENT", "CBS", "BTLS", "AMOUNT", "CNF"])
+  const rawLines = tableText.split("\n").map((l) => l.trim()).filter(Boolean)
+  const lines = rawLines.filter((l) => {
+    const up = l.toUpperCase()
+    return !TABLE_HEADER_WORDS.has(up)
+      && !/^SR\s*NO\.?/i.test(l)
+      && !/^ITEM\s*NAME/i.test(l)
+  })
+
+  // Walk lines: whenever we see a standalone 1-2 digit SR number, start a new segment
+  type Segment = { srNo: number; lines: string[] }
+  const segments: Segment[] = []
+  let current: Segment | null = null
+
+  for (const line of lines) {
+    const srMatch = /^(\d{1,2})$/.exec(line)
+    if (srMatch) {
+      if (current) segments.push(current)
+      current = { srNo: parseInt(srMatch[1]), lines: [] }
+    } else {
+      if (!current) current = { srNo: 0, lines: [] }
+      current.lines.push(line)
+    }
   }
-  const dataHits: DataHit[] = []
+  if (current) segments.push(current)
 
-  for (let i = 0; i < lines.length; i++) {
-    const parsed = tryParseMergedLine(lines[i])
-    if (!parsed) continue
-    const [rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt] = parsed
-    // The line may have text before the numbers (single-line rows)
-    const numStart = lines[i].search(/\d/)
-    const prefixText = numStart > 0 ? lines[i].slice(0, numStart).trim() : ""
-    dataHits.push({ lineIdx: i, rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt, prefixText })
-  }
-
-  if (dataHits.length === 0) {
-    const snippet = tableText.slice(0, 400).replace(/\n/g, " ↵ ")
-    warnings.push(`No table rows parsed. First 400 chars: "${snippet}"`)
+  if (segments.length === 0) {
+    warnings.push(`No table rows found. Table text snippet: "${tableText.slice(0, 200).replace(/\n/g, " ↵ ")}"`)
     return { indentNumber, invoiceNumber, retailerId, retailerName, indentDate, totalRationedItems, totalIndentValue: 0, totalConfirmedValue: 0, items: [], rawText: text, warnings }
   }
 
-  // Parse each row
+  // Parse each segment
   const items: ParsedIndentItem[] = []
-  let prevDataLineIdx = -1
 
-  for (const hit of dataHits) {
-    const segLines = lines.slice(prevDataLineIdx + 1, hit.lineIdx + 1)
-    prevDataLineIdx = hit.lineIdx
+  for (const seg of segments) {
+    // Find the numeric line (last line that parses successfully)
+    let numericIdx = -1
+    let parsed: ReturnType<typeof parseMergedNumbers> = null
 
-    const { rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt } = hit
-
-    const descLines: string[] = []
-    for (const l of segLines.slice(0, segLines.length - 1)) {
-      const t = l.trim()
-      if (t) descLines.push(t)
-    }
-    if (hit.prefixText) descLines.push(hit.prefixText)
-
-    // SR number
-    let srNo = 0
-    const firstLine = descLines[0] ?? ""
-    const soloNum = /^\d{1,2}$/.exec(firstLine)
-    if (soloNum) {
-      srNo = parseInt(soloNum[0])
-      descLines.shift()
-    } else {
-      const inlineNum = /^(\d{1,2})\s+/.exec(firstLine)
-      if (inlineNum) {
-        srNo = parseInt(inlineNum[1])
-        descLines[0] = firstLine.slice(inlineNum[0].length)
+    for (let i = seg.lines.length - 1; i >= 0; i--) {
+      const result = parseMergedNumbers(seg.lines[i])
+      if (result) {
+        numericIdx = i
+        parsed = result
+        break
       }
     }
-    if (srNo === 0) srNo = items.length + 1
 
-    const descText = descLines.join(" ").trim()
+    if (!parsed || numericIdx === -1) {
+      warnings.push(`SR${seg.srNo}: could not parse numeric line from "${seg.lines.join(" | ").slice(0, 80)}"`)
+      continue
+    }
 
+    const descLines = seg.lines.slice(0, numericIdx)
+
+    // Extract item code from desc lines
     let baseCode = ""
     let subCode = ""
-    let rawItemName = descText
 
-    const m8 = CODE_8_RE.exec(descText)
-    if (m8) {
-      baseCode = m8[0]
-      const afterCode = descText.slice(m8.index + 8).trimStart()
-      const sub3 = /^(\d{3})\b/.exec(afterCode)
-      if (sub3) {
-        const trail = afterCode.slice(sub3[0].length).trimStart()
-        if (!/^ML/i.test(trail)) subCode = sub3[1]
-      }
-      if (!subCode) {
-        for (const dl of descLines) {
-          if (/^\d{3}$/.test(dl.trim())) { subCode = dl.trim(); break }
-        }
-      }
-      rawItemName = descText.slice(0, m8.index).trim()
-    } else {
-      const m4 = CODE_4_RE.exec(descText)
-      if (m4) {
-        baseCode = m4[1]
-        rawItemName = descText.slice(0, m4.index).trim()
-      } else {
-        warnings.push(`SR${srNo}: no KSBCL code in "${descText.slice(0, 40)}"`)
+    // 8-digit code: look for it in desc lines
+    for (const dl of descLines) {
+      const m8 = CODE_8_RE.exec(dl)
+      if (m8) {
+        baseCode = m8[0]
+        // subcode is a standalone 3-digit line following the base code line
+        const idx = descLines.indexOf(dl)
+        const next = descLines[idx + 1]?.trim() ?? ""
+        if (/^\d{3}$/.test(next)) subCode = next
+        break
       }
     }
 
-    const ksbclItemCode = subCode ? `${baseCode}${subCode}` : baseCode
-    const itemName = cleanItemName(rawItemName || descText)
-    const { sizeMl, bottlesPerCase } = extractSizeInfo(descText)
+    // 4-digit code: either glued to numeric line (parsed.code4) or standalone line
+    if (!baseCode) {
+      if (parsed.code4) {
+        baseCode = parsed.code4
+      } else {
+        for (const dl of descLines) {
+          if (CODE_4_ALONE_RE.test(dl.trim())) {
+            baseCode = dl.trim()
+            break
+          }
+        }
+      }
+    }
 
+    // Item name = desc lines minus code lines
+    const codeLines = new Set<string>()
+    if (baseCode) codeLines.add(baseCode)
+    if (subCode) codeLines.add(subCode)
+    const nameLines = descLines.filter((dl) => !codeLines.has(dl.trim()))
+    const rawItemName = nameLines.join(" ").trim()
+    const itemName = cleanItemName(rawItemName)
+    const { sizeMl, bottlesPerCase } = extractSizeInfo(rawItemName)
+
+    const ksbclItemCode = subCode ? `${baseCode}${subCode}` : baseCode
+
+    const { rate, indCbs, indBtls, indAmt, cnfCbs, cnfBtls, cnfAmt } = parsed
     const isNotAllocated = cnfCbs === 0 && cnfBtls === 0
     const isRationed = !isNotAllocated && (cnfCbs < indCbs || cnfBtls < indBtls)
 
     items.push({
-      srNo, ksbclItemCode, ksbclBaseCode: baseCode, ksbclSubCode: subCode,
-      itemName, rawItemName, sizeMl, bottlesPerCase,
+      srNo: seg.srNo || items.length + 1,
+      ksbclItemCode,
+      ksbclBaseCode: baseCode,
+      ksbclSubCode: subCode,
+      itemName,
+      rawItemName,
+      sizeMl,
+      bottlesPerCase,
       ratePerCase: rate,
-      indentCases: indCbs, indentBottles: indBtls, indentAmount: indAmt,
-      cnfCases: cnfCbs, cnfBottles: cnfBtls, cnfAmount: cnfAmt,
-      isRationed, isNotAllocated,
+      indentCases: indCbs,
+      indentBottles: indBtls,
+      indentAmount: indAmt,
+      cnfCases: cnfCbs,
+      cnfBottles: cnfBtls,
+      cnfAmount: cnfAmt,
+      isRationed,
+      isNotAllocated,
     })
   }
 
   const computedRationed = items.filter((i) => i.isRationed).length
   if (totalRationedItems > 0 && computedRationed !== totalRationedItems) {
-    warnings.push(`Rationed count: PDF says ${totalRationedItems}, computed ${computedRationed}`)
+    warnings.push(`Rationed count mismatch: PDF says ${totalRationedItems}, computed ${computedRationed}`)
   }
 
   const totalIndentValue = items.reduce((s, i) => s + i.indentAmount, 0)
   const totalConfirmedValue = items.reduce((s, i) => s + i.cnfAmount, 0)
 
-  return { indentNumber, invoiceNumber, retailerId, retailerName, indentDate, totalRationedItems, totalIndentValue, totalConfirmedValue, items, rawText: text, warnings }
+  return {
+    indentNumber, invoiceNumber, retailerId, retailerName, indentDate,
+    totalRationedItems, totalIndentValue, totalConfirmedValue,
+    items, rawText: text, warnings,
+  }
 }

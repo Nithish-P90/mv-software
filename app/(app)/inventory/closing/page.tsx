@@ -71,7 +71,6 @@ export default function ClosingInventoryPage(): JSX.Element {
       <PageShell title="Physical Count (Closing)">
         <div className="bg-white p-4 rounded-xl border border-slate-200 text-center max-w-lg shadow-sm mx-auto mt-10">
           <h2 className="text-xl font-black text-slate-800 mb-2">Begin Count Session</h2>
-          <p className="text-slate-500 mb-6 text-sm">Lock the inventory state and begin recording physical bottle counts for the end-of-day process.</p>
           <Button onClick={handleStart} variant="primary" disabled={loading} className="w-full py-3">
             {loading ? "Starting..." : "Start Session"}
           </Button>
@@ -83,7 +82,6 @@ export default function ClosingInventoryPage(): JSX.Element {
   return (
     <PageShell title={`Active Count Session #${sessionId}`}>
       <div className="mb-6 flex justify-between items-center bg-indigo-50 border border-indigo-100 p-4 rounded-xl">
-        <p className="text-sm font-bold text-indigo-700">Only items with entered quantities will be recorded.</p>
         <Button onClick={handleSubmit} variant="primary" disabled={submitting}>
           {submitting ? "Submitting..." : "Submit Counts"}
         </Button>

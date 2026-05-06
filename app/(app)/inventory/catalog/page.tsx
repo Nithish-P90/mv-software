@@ -56,7 +56,7 @@ export default function InventoryCatalogPage(): JSX.Element {
         <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-xl font-black text-slate-800">Live Inventory</h2>
-            <p className="text-sm text-slate-500 mt-1">Cashiers can view this catalog. Admins can jump to opening stock adjustments.</p>
+            <p className="text-sm text-slate-500 mt-1"></p>
           </div>
           {isAdmin && (
             <Button onClick={() => (window.location.href = "/inventory/opening")} variant="primary">

@@ -183,7 +183,6 @@ export default function OpeningInventoryPage(): JSX.Element {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-black text-slate-800">Session Active</h2>
-                <p className="text-slate-600 mt-1">Opening stock is visible here for cashiers and editable by admins.</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <Button onClick={() => (window.location.href = "/inventory/catalog")} variant="secondary">
