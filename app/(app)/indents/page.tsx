@@ -1,134 +1,97 @@
 "use client"
-
 import { useEffect, useState } from "react"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Plus } from "lucide-react"
-
-import { Button } from "@/components/ui/Button"
 import { PageShell } from "@/components/PageShell"
+import { Button } from "@/components/ui/Button"
 
-type IndentRow = {
-  id: number
-  indentNumber: string
-  retailerName: string
-  indentDate: string
-  status: string
-  items: Array<{ id: number; isNewItem: boolean }>
-  receipts: Array<{ id: number }>
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: "bg-amber-100 text-amber-700 border-amber-200",
-  PARTIAL: "bg-blue-100 text-blue-700 border-blue-200",
-  FULLY_RECEIVED: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  STOCK_ADDED: "bg-slate-900 text-white border-slate-900",
-}
-
-export default function IndentsPage(): JSX.Element {
-  const [indents, setIndents] = useState<IndentRow[]>([])
+export default function IndentsPage() {
+  const router = useRouter()
+  const [indents, setIndents] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
-  function showToast(msg: string, ok: boolean): void {
-    setToast({ msg, ok })
-    setTimeout(() => setToast(null), 3500)
-  }
+  useEffect(() => {
+    fetch("/api/indents")
+      .then((r) => r.json())
+      .then((d) => { setIndents(Array.isArray(d) ? d : []); setLoading(false) })
+  }, [])
 
-  async function fetchIndents(): Promise<void> {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/indents")
-      const data = await res.json()
-      setIndents(Array.isArray(data) ? data : [])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchIndents() }, [])
-
-  async function handleConfirm(id: number): Promise<void> {
-    const res = await fetch(`/api/indents/${id}/confirm`, { method: "POST" })
-    if (res.ok) {
-      showToast("Stock added", true)
-      fetchIndents()
-    } else {
-      const err = await res.json()
-      showToast(err.error ?? "Confirm failed", false)
-    }
+  const STATUS_COLORS: Record<string, string> = {
+    PENDING: "bg-amber-100 text-amber-700 border-amber-200",
+    PARTIAL: "bg-blue-100 text-blue-700 border-blue-200",
+    FULLY_RECEIVED: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    STOCK_ADDED: "bg-slate-900 text-white border-slate-900",
   }
 
   return (
-    <PageShell title="Procurement Registry">
-      {toast && (
-        <div className={`mb-4 rounded-2xl border-2 px-6 py-4 text-sm font-black uppercase tracking-widest animate-in slide-in-from-top-4 ${toast.ok ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-rose-100 bg-rose-50 text-rose-700"}`}>
-          {toast.msg}
-        </div>
-      )}
-
-      <div className="mb-5 flex justify-between items-center border-b-2 border-slate-50 pb-8">
+    <PageShell title="Indents">
+      <div className="mb-5 flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Indent Stream</h2>
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mt-1">Stock Acquisition Audit</p>
+          <h2 className="text-xl font-black text-slate-900">Procurement Register</h2>
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mt-0.5">KSBCL Indent History</p>
         </div>
-        <Link href="/indents/upload">
-          <Button variant="primary" className="flex items-center gap-3 px-4 py-4 rounded-2xl shadow-xl shadow-slate-900/10 font-black uppercase tracking-widest text-[11px] active:scale-95 transition-all">
-            <Plus size={18} /> Upload Indent PDF
-          </Button>
-        </Link>
+        <Button variant="primary" onClick={() => router.push("/indents/upload")} className="flex items-center gap-2">
+          <Plus size={15} /> Upload PDF
+        </Button>
       </div>
 
       {loading ? (
-        <div className="py-3 text-center text-slate-400 font-black uppercase tracking-[0.2em] text-[11px]">Syncing Procurement Data…</div>
+        <p className="text-center py-10 text-[11px] font-black uppercase tracking-widest text-slate-400 animate-pulse">Loading…</p>
       ) : indents.length === 0 ? (
-        <div className="py-3 text-center border-4 border-slate-50 border-dashed rounded-xl">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">No procurement records found</p>
+        <div className="rounded-xl border-2 border-dashed border-slate-100 py-16 text-center">
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">No indents uploaded yet</p>
+          <button onClick={() => router.push("/indents/upload")}
+            className="mt-4 text-xs font-black uppercase tracking-widest text-slate-600 hover:text-slate-900 transition-colors underline underline-offset-4">
+            Upload first indent →
+          </button>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border-2 border-slate-50 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 border-b-2 border-slate-50">
+        <div className="rounded-xl border border-slate-100 overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-100">
               <tr>
-                <th className="px-6 py-5">Sequential ID</th>
-                <th className="px-6 py-5">Retailer Entity</th>
-                <th className="px-6 py-5">Audit Date</th>
-                <th className="px-6 py-5">Line Count</th>
-                <th className="px-6 py-5">Status</th>
-                <th className="px-6 py-5 text-center">Management</th>
+                <th className="px-5 py-3">Indent No</th>
+                <th className="px-5 py-3">Retailer</th>
+                <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3 text-right">CNF Value</th>
+                <th className="px-5 py-3">Items</th>
+                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y-2 divide-slate-50">
+            <tbody className="divide-y divide-slate-50">
               {indents.map((indent) => {
-                const unmapped = indent.items.filter((i) => i.isNewItem).length
+                const cnfValue = indent.items.reduce((s: number, i: any) => s + Number(i.cnfAmount), 0)
+                const rationedCount = indent.items.filter((i: any) => i.isRationed).length
                 return (
-                  <tr key={indent.id} className="group hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-5 font-black text-slate-900 font-mono text-base">{indent.indentNumber}</td>
-                    <td className="px-6 py-5 font-black text-slate-700 uppercase tracking-tight text-xs">{indent.retailerName}</td>
-                    <td className="px-6 py-5 text-slate-400 font-bold uppercase tracking-widest text-[10px]">{indent.indentDate?.slice(0, 10)}</td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-700">{indent.items.length} Units</span>
-                        {unmapped > 0 && (
-                          <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-rose-600 border border-rose-100">
-                            {unmapped} Unmapped
-                          </span>
-                        )}
-                      </div>
+                  <tr key={indent.id} className="hover:bg-slate-50/60 transition-colors">
+                    <td className="px-5 py-3 font-mono text-xs font-black text-slate-800">{indent.indentNumber}</td>
+                    <td className="px-5 py-3">
+                      <p className="text-xs font-bold text-slate-700">{indent.retailerName}</p>
+                      <p className="text-[10px] text-slate-400">#{indent.retailerId}</p>
                     </td>
-                    <td className="px-6 py-5">
-                      <span className={`rounded-xl border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest shadow-sm ${STATUS_COLORS[indent.status] ?? "bg-slate-50 text-slate-400 border-slate-200"}`}>
-                        {indent.status.replace('_', ' ')}
+                    <td className="px-5 py-3 text-[10px] font-bold text-slate-500">
+                      {indent.indentDate ? new Date(indent.indentDate).toLocaleDateString("en-GB") : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right text-xs font-black text-slate-800 tabular-nums">
+                      ₹{cnfValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className="text-xs font-bold text-slate-600">{indent.items.length}</span>
+                      {rationedCount > 0 && (
+                        <span className="ml-2 text-[9px] font-black uppercase text-amber-600">{rationedCount} rationed</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase tracking-widest ${STATUS_COLORS[indent.status] ?? "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                        {indent.status?.replace(/_/g, " ")}
                       </span>
                     </td>
-                    <td className="px-6 py-5">
-                      <div className="flex gap-4 justify-center">
-                        <Link href={`/indents/${indent.id}`}>
-                          <button className="text-indigo-600 hover:text-indigo-900 text-[10px] font-black uppercase tracking-widest transition-colors">Review Registry</button>
-                        </Link>
-                        {indent.status !== "STOCK_ADDED" && unmapped === 0 && (
-                          <button onClick={() => handleConfirm(indent.id)} className="text-emerald-600 hover:text-emerald-900 text-[10px] font-black uppercase tracking-widest transition-colors">Confirm Arrival</button>
-                        )}
-                      </div>
+                    <td className="px-5 py-3">
+                      <button onClick={() => router.push(`/indents/${indent.id}`)}
+                        className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900 transition-colors">
+                        View →
+                      </button>
                     </td>
                   </tr>
                 )
