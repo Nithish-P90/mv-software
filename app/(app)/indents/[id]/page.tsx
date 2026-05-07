@@ -143,7 +143,7 @@ export default function IndentDetailPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {indent.items.map((item: any) => (
+            {indent.items.map((item) => (
               <tr key={item.id} className={`${item.isRationed ? "bg-amber-50/40" : ""} hover:bg-slate-50/60 transition-colors`}>
                 <td className="px-4 py-3">
                   <p className="text-xs font-bold text-slate-900">
